@@ -18,10 +18,12 @@ export interface ImagesBinding {
 
 export type Bindings = {
   IMAGES: ImagesBinding;
+  GOOGLE_AI_KEY?: string;
 };
 
 export type Variables = {
   falKey: string;
+  googleKey?: string;
 };
 
 export type App = { Bindings: Bindings; Variables: Variables };

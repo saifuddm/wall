@@ -24,7 +24,13 @@ This API does **not** store any fal.ai API key on the server. Every request must
 X-Fal-Key: your_fal_api_key_here
 ```
 
-Requests without this header will receive a `401 Unauthorized` response.
+For the **wallpaper** endpoints (`POST /wallpaper`, `GET /wallpaper/status/:requestId`, `GET /wallpaper/result/:requestId`), you must also provide a Google AI API key via the `X-Google-Key` header (used for Gemini prompt generation):
+
+```
+X-Google-Key: your_google_ai_api_key_here
+```
+
+Requests without the required headers will receive a `401 Unauthorized` response.
 
 ## Development
 
@@ -191,16 +197,46 @@ curl -X POST http://localhost:8787/restyle \
 }
 ```
 
-## Common screen sizes
+### `POST /wallpaper`
 
-| Device        | Width | Height |
-| ------------- | ----- | ------ |
-| 1080p         | 1920  | 1080   |
-| 1440p         | 2560  | 1440   |
-| 4K            | 3840  | 2160   |
-| Ultrawide     | 3440  | 1440   |
-| MacBook Pro   | 3024  | 1964   |
-| iPhone 15 Pro | 1179  | 2556   |
+Queue an isometric city wallpaper generation (returns immediately; use status/result to poll). Uses Gemini for prompt generation and fal.ai FLUX 2 Pro for image generation. Avoids request timeouts by using the fal.ai Queue API.
+
+**Request body (JSON):**
+
+| Field      | Type   | Required | Description                                 |
+| ---------- | ------ | -------- | ------------------------------------------- |
+| `city`     | string | yes      | City name (e.g. `Paris`, `Tokyo`)           |
+| `weather`  | string | yes      | Weather condition (e.g. `Sunny`, `Rainy`)   |
+| `datetime` | string | yes      | Time of day (e.g. `Day`, `Sunset`, `Night`) |
+| `width`    | number | yes      | Output width in px                          |
+| `height`   | number | yes      | Output height in px                         |
+
+**Required headers:** `X-Fal-Key`, `X-Google-Key` (Google AI API key for Gemini prompt generation)
+
+**Example request:**
+
+```bash
+# 1. Submit (returns 202 with request_id)
+curl -X POST http://localhost:8787/wallpaper \
+  -H "Content-Type: application/json" \
+  -H "X-Fal-Key: YOUR_FAL_KEY" \
+  -H "X-Google-Key: YOUR_GOOGLE_AI_KEY" \
+  -d '{"city": "Tokyo", "weather": "Sunny", "datetime": "Sunset", "width": 1920, "height": 1080}'
+
+# 2. Poll status until COMPLETED
+curl -H "X-Fal-Key: YOUR_FAL_KEY" -H "X-Google-Key: YOUR_GOOGLE_AI_KEY" http://localhost:8787/wallpaper/status/REQUEST_ID
+
+# 3. Fetch the image when ready
+curl -H "X-Fal-Key: YOUR_FAL_KEY" -H "X-Google-Key: YOUR_GOOGLE_AI_KEY" http://localhost:8787/wallpaper/result/REQUEST_ID --output wallpaper.png
+```
+
+**Success (202):** `{ request_id, status_url, response_url, message }`
+
+**GET /wallpaper/status/:requestId** — Returns `{ status, queue_position?, image_url? }`. Poll every 2–3 seconds until `status === "COMPLETED"`.
+
+**GET /wallpaper/result/:requestId** — Returns the image binary when ready, or 202 with `{ status: "IN_PROGRESS", message }` if not yet complete.
+
+
 
 ---
 
@@ -216,3 +252,4 @@ curl -X POST http://localhost:8787/restyle \
 | HEIC format x2           | cloudflare IMAGE binding                                                                               |
 | Logging                  | plan for logging, not implemented                                                                      |
 | Learning                 | apple shortcut and automation                                                                          |
+| Wallpaper gen            | connect with gemini to get dynamic prompt for location, timeout issues, consistent styling             |

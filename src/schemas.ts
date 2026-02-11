@@ -33,6 +33,33 @@ export const generateSchema = z.object({
     .optional(),
 });
 
+export const wallpaperSchema = z.object({
+  city: z
+    .string()
+    .min(1, "City is required")
+    .max(200, "City must be 200 characters or less"),
+  weather: z
+    .string()
+    .min(1, "Weather is required")
+    .max(500, "Weather must be 500 characters or less"),
+  datetime: z
+    .string()
+    .min(1, "Datetime is required")
+    .max(200, "Datetime must be 200 characters or less"),
+  width: z
+    .number()
+    .int("Width must be an integer")
+    .min(512, "Minimum width is 512px")
+    .max(4096, "Maximum width is 4096px")
+    .refine((v) => v % 8 === 0, "Width must be divisible by 8"),
+  height: z
+    .number()
+    .int("Height must be an integer")
+    .min(512, "Minimum height is 512px")
+    .max(4096, "Maximum height is 4096px")
+    .refine((v) => v % 8 === 0, "Height must be divisible by 8"),
+});
+
 export const restyleHeadersSchema = z.object({
   style: z
     .string()

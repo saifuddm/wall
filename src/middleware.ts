@@ -50,3 +50,22 @@ export const falKeyMiddleware = createMiddleware<App>(async (c, next) => {
   c.set("falKey", key);
   await next();
 });
+
+/**
+ * Extracts the user's Google AI API key from the `X-Google-Key` request header.
+ * Returns 401 if the header is missing or empty.
+ * Applied only to /wallpaper routes.
+ */
+export const googleKeyMiddleware = createMiddleware<App>(async (c, next) => {
+  const key = c.req.header("X-Google-Key");
+
+  if (!key) {
+    return c.json(
+      { error: "Missing X-Google-Key header. Provide your Google AI API key." },
+      401,
+    );
+  }
+
+  c.set("googleKey", key);
+  await next();
+});
