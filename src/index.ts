@@ -1,6 +1,12 @@
 import { Hono } from "hono";
+import { requestId } from "hono/request-id";
 import type { App } from "./types";
-import { requestLogger, falKeyMiddleware, googleKeyMiddleware } from "./middleware";
+import {
+  pinoLogger,
+  requestLogger,
+  falKeyMiddleware,
+  googleKeyMiddleware,
+} from "./middleware";
 import models from "./routes/models";
 import generate from "./routes/generate";
 import restyle from "./routes/restyle";
@@ -8,8 +14,10 @@ import wallpaper from "./routes/wallpaper";
 
 const app = new Hono<App>();
 
-// -- Log incoming requests (before auth) ------------------------------------
+// -- Request correlation + structured logging (before auth) -----------------
 
+app.use("*", requestId());
+app.use("*", pinoLogger);
 app.use("*", requestLogger);
 
 // -- Require X-Fal-Key header on protected routes ---------------------------
@@ -23,7 +31,11 @@ app.use("/wallpaper/*", googleKeyMiddleware);
 // -- Global error handler ---------------------------------------------------
 
 app.onError((err, c) => {
-  console.error("Unhandled error:", err);
+  try {
+    c.get("logger").error({ err }, "Unhandled error");
+  } catch {
+    console.error("Unhandled error:", err);
+  }
   return c.json(
     {
       error: "Internal server error",

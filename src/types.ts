@@ -21,7 +21,11 @@ export type Bindings = {
   GOOGLE_AI_KEY?: string;
 };
 
+import type { Logger } from "pino";
+
 export type Variables = {
+  requestId: string;
+  logger: Logger;
   falKey: string;
   googleKey?: string;
 };

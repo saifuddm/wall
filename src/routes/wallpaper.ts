@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { createFalClient } from "@fal-ai/client";
 import type { Image } from "@fal-ai/client/endpoints";
+import type { Logger } from "pino";
 import type { App } from "../types";
 import { wallpaperSchema } from "../schemas";
 
@@ -176,6 +177,7 @@ async function generatePromptWithGemini(
   datetime: string,
   width: number,
   height: number,
+  logger?: Logger,
 ): Promise<GeminiDynamicFields> {
   const orientation =
     height > width
@@ -184,6 +186,12 @@ async function generatePromptWithGemini(
         ? "landscape/horizontal (wide)"
         : "square";
   const userMessage = `City: ${city}\nWeather: ${weather}\nTime: ${datetime}\nImage dimensions: ${width}×${height} (${orientation})`;
+
+  logger?.info(
+    { model: GEMINI_MODEL, userMessage, width, height },
+    "gemini_request",
+  );
+  const geminiStart = Date.now();
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
@@ -209,6 +217,16 @@ async function generatePromptWithGemini(
 
   if (!response.ok) {
     const errorBody = await response.text().catch(() => "");
+    const elapsed = Date.now() - geminiStart;
+    logger?.error(
+      {
+        model: GEMINI_MODEL,
+        status: response.status,
+        elapsed,
+        errorBody: errorBody.slice(0, 500),
+      },
+      "gemini_error",
+    );
     throw new Error(
       `Gemini API returned ${response.status}: ${errorBody}`,
     );
@@ -222,10 +240,25 @@ async function generatePromptWithGemini(
 
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) {
+    const elapsed = Date.now() - geminiStart;
+    logger?.error({ model: GEMINI_MODEL, elapsed }, "gemini_empty_response");
     throw new Error("Gemini returned an empty response");
   }
 
-  return JSON.parse(text) as GeminiDynamicFields;
+  const result = JSON.parse(text) as GeminiDynamicFields;
+  const elapsed = Date.now() - geminiStart;
+  const responseSummary = {
+    sceneLength: result.scene?.length ?? 0,
+    subjectsCount: result.subjects?.length ?? 0,
+    colorPalette: result.color_palette,
+    lighting: result.lighting,
+    mood: result.mood,
+  };
+  logger?.info(
+    { model: GEMINI_MODEL, elapsed, responseSummary },
+    "gemini_response",
+  );
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +301,7 @@ wallpaper.post("/", async (c) => {
     );
   }
 
+  const logger = c.get("logger");
   let geminiResult: GeminiDynamicFields;
   try {
     geminiResult = await generatePromptWithGemini(
@@ -277,9 +311,10 @@ wallpaper.post("/", async (c) => {
       datetime,
       width,
       height,
+      logger,
     );
   } catch (err) {
-    console.error("Gemini prompt generation error:", err);
+    logger.error({ err }, "Gemini prompt generation error");
     return c.json(
       {
         error: "Prompt generation failed",
@@ -321,33 +356,37 @@ wallpaper.post("/", async (c) => {
 
   const promptString = JSON.stringify(fullPrompt);
 
-  console.log(
-    JSON.stringify({
-      wallpaper_generation: {
-        city,
-        weather,
-        datetime,
-        width,
-        height,
-        prompt: fullPrompt,
-      },
-    }),
+  logger.info(
+    { city, weather, datetime, width, height, promptLength: promptString.length },
+    "wallpaper_prompt_ready",
   );
 
   // ── Step 3: Submit to fal.ai queue (async — avoids request timeout) ───
 
   const fal = createFalClient({ credentials: c.get("falKey") });
 
+  const falInput = {
+    prompt: promptString,
+    image_size: { width, height },
+    output_format: "png",
+  };
+  logger.info(
+    { model: FAL_MODEL, promptLength: promptString.length, image_size: { width, height } },
+    "fal_queue_submit_request",
+  );
+  const falSubmitStart = Date.now();
+
   try {
     const queueStatus = await fal.queue.submit(FAL_MODEL, {
-      input: {
-        prompt: promptString,
-        image_size: { width, height },
-        output_format: "png",
-      },
+      input: falInput,
     });
 
+    const elapsed = Date.now() - falSubmitStart;
     const requestId = queueStatus.request_id;
+    logger.info(
+      { model: FAL_MODEL, falRequestId: requestId, elapsed },
+      "fal_queue_submit_complete",
+    );
     const statusUrl = queueStatus.status_url ?? `https://queue.fal.run/${FAL_MODEL}/requests/${requestId}/status`;
     const responseUrl = queueStatus.response_url ?? `https://queue.fal.run/${FAL_MODEL}/requests/${requestId}`;
 
@@ -362,7 +401,8 @@ wallpaper.post("/", async (c) => {
       202,
     );
   } catch (err) {
-    console.error("fal.ai queue submit error:", err);
+    const elapsed = Date.now() - falSubmitStart;
+    logger.error({ err, model: FAL_MODEL, elapsed }, "fal_queue_submit_error");
 
     const message =
       err instanceof Error ? err.message : "Failed to queue image generation";
@@ -390,14 +430,22 @@ wallpaper.post("/", async (c) => {
 async function getQueueStatus(
   fal: ReturnType<typeof createFalClient>,
   requestId: string,
+  logger?: Logger,
 ): Promise<
   | { status: string; queue_position?: number; image_url?: string }
   | { error: string; status?: number }
 > {
   try {
+    logger?.info({ model: FAL_MODEL, requestId }, "fal_queue_status_request");
+    const statusStart = Date.now();
     const status = await fal.queue.status(FAL_MODEL, {
       requestId,
     });
+    const elapsed = Date.now() - statusStart;
+    logger?.info(
+      { model: FAL_MODEL, requestId, status: status.status, elapsed },
+      "fal_queue_status_complete",
+    );
 
     const queuePosition =
       status.status === "IN_QUEUE" && "queue_position" in status
@@ -409,9 +457,16 @@ async function getQueueStatus(
     };
 
     if (status.status === "COMPLETED") {
+      logger?.info({ model: FAL_MODEL, requestId }, "fal_queue_result_request");
+      const resultStart = Date.now();
       const result = await fal.queue.result(FAL_MODEL, { requestId });
+      const resultElapsed = Date.now() - resultStart;
       const data = result.data as { images?: Image[] };
       const imageUrl = data.images?.[0]?.url;
+      logger?.info(
+        { model: FAL_MODEL, requestId, elapsed: resultElapsed, imageUrl },
+        "fal_queue_result_complete",
+      );
       return { ...base, image_url: imageUrl ?? undefined };
     }
 
@@ -423,6 +478,10 @@ async function getQueueStatus(
         : 500;
     const message =
       err instanceof Error ? err.message : "Failed to get queue status";
+    logger?.error(
+      { err, model: FAL_MODEL, requestId },
+      "fal_queue_status_error",
+    );
     return { error: message, status };
   }
 }
@@ -434,7 +493,7 @@ wallpaper.get("/status/:requestId", async (c) => {
   }
 
   const fal = createFalClient({ credentials: c.get("falKey") });
-  const outcome = await getQueueStatus(fal, requestId);
+  const outcome = await getQueueStatus(fal, requestId, c.get("logger"));
 
   if ("error" in outcome) {
     const httpStatus =
@@ -458,12 +517,18 @@ wallpaper.get("/result/:requestId", async (c) => {
   }
 
   const fal = createFalClient({ credentials: c.get("falKey") });
+  const logger = c.get("logger");
+
+  logger.info({ model: FAL_MODEL, requestId }, "fal_queue_result_request");
+  const resultStart = Date.now();
 
   try {
     const result = await fal.queue.result(FAL_MODEL, { requestId });
+    const elapsed = Date.now() - resultStart;
     const data = result.data as { images?: Image[] };
 
     if (!data.images || data.images.length === 0) {
+      logger.warn({ model: FAL_MODEL, requestId, elapsed }, "fal_queue_result_no_images");
       return c.json(
         { error: "No image was generated by the model" },
         500,
@@ -471,6 +536,10 @@ wallpaper.get("/result/:requestId", async (c) => {
     }
 
     const image = data.images[0];
+    logger.info(
+      { model: FAL_MODEL, requestId, elapsed, imageUrl: image.url },
+      "fal_queue_result_complete",
+    );
 
     const imageResponse = await fetch(image.url);
     if (!imageResponse.ok) {
@@ -491,10 +560,13 @@ wallpaper.get("/result/:requestId", async (c) => {
       },
     });
   } catch (err) {
+    const elapsed = Date.now() - resultStart;
     const status =
       typeof (err as Record<string, unknown>)?.status === "number"
         ? (err as Record<string, unknown>).status as number
         : 500;
+
+    logger.error({ err, model: FAL_MODEL, requestId, elapsed }, "fal_queue_result_error");
 
     if (status === 400) {
       return c.json(

@@ -10,18 +10,23 @@ models.get("/", async (c) => {
   const limit = Number(c.req.query("limit")) || 50;
   const cursor = c.req.query("cursor");
 
+  const logger = c.get("logger");
   try {
     // 1. Fetch models from fal.ai platform API
-    const modelsRes = await fetchModels(c.get("falKey"), {
-      category,
-      q: q ?? undefined,
-      limit,
-      cursor: cursor ?? undefined,
-    });
+    const modelsRes = await fetchModels(
+      c.get("falKey"),
+      {
+        category,
+        q: q ?? undefined,
+        limit,
+        cursor: cursor ?? undefined,
+      },
+      logger,
+    );
 
     // 2. Fetch pricing for the returned models
     const endpointIds = modelsRes.models.map((m) => m.endpoint_id);
-    const pricing = await fetchPricing(c.get("falKey"), endpointIds);
+    const pricing = await fetchPricing(c.get("falKey"), endpointIds, logger);
 
     // 3. Merge into a clean response
     const merged = modelsRes.models.map((m) => {
@@ -50,7 +55,7 @@ models.get("/", async (c) => {
       next_cursor: modelsRes.next_cursor,
     });
   } catch (err) {
-    console.error("Failed to fetch models:", err);
+    logger.error({ err }, "Failed to fetch models");
     return c.json(
       {
         error: "Failed to fetch models from fal.ai",

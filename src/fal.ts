@@ -1,3 +1,4 @@
+import type { Logger } from "pino";
 import type {
   FalModelsResponse,
   FalPriceEntry,
@@ -13,6 +14,7 @@ const FAL_PLATFORM_API = "https://api.fal.ai/v1";
 export async function fetchModels(
   apiKey: string,
   opts: { category?: string; q?: string; limit?: number; cursor?: string } = {},
+  logger?: Logger,
 ): Promise<FalModelsResponse> {
   const params = new URLSearchParams();
   params.set("category", opts.category ?? "text-to-image");
@@ -21,16 +23,30 @@ export async function fetchModels(
   if (opts.limit) params.set("limit", String(opts.limit));
   if (opts.cursor) params.set("cursor", opts.cursor);
 
-  const res = await fetch(`${FAL_PLATFORM_API}/models?${params}`, {
+  const url = `${FAL_PLATFORM_API}/models?${params}`;
+  logger?.info(
+    { url: `${FAL_PLATFORM_API}/models`, category: opts.category, q: opts.q, limit: opts.limit },
+    "fal_platform_models_request",
+  );
+  const start = Date.now();
+
+  const res = await fetch(url, {
     headers: { Authorization: `Key ${apiKey}` },
   });
 
+  const elapsed = Date.now() - start;
+
   if (!res.ok) {
+    logger?.error(
+      { status: res.status, statusText: res.statusText, elapsed },
+      "fal_platform_models_error",
+    );
     throw new Error(
       `fal.ai model search failed: ${res.status} ${res.statusText}`,
     );
   }
 
+  logger?.info({ elapsed }, "fal_platform_models_complete");
   return res.json() as Promise<FalModelsResponse>;
 }
 
@@ -42,6 +58,7 @@ export async function fetchModels(
 export async function fetchPricing(
   apiKey: string,
   endpointIds: string[],
+  logger?: Logger,
 ): Promise<Map<string, FalPriceEntry>> {
   if (endpointIds.length === 0) return new Map();
 
@@ -50,14 +67,27 @@ export async function fetchPricing(
     params.append("endpoint_id", id);
   }
 
+  logger?.info(
+    { endpointCount: endpointIds.length },
+    "fal_platform_pricing_request",
+  );
+  const start = Date.now();
+
   const res = await fetch(`${FAL_PLATFORM_API}/models/pricing?${params}`, {
     headers: { Authorization: `Key ${apiKey}` },
   });
 
+  const elapsed = Date.now() - start;
+
   if (!res.ok) {
-    console.error(`fal.ai pricing fetch failed: ${res.status}`);
+    logger?.error(
+      { status: res.status, elapsed },
+      "fal_platform_pricing_error",
+    );
     return new Map();
   }
+
+  logger?.info({ elapsed }, "fal_platform_pricing_complete");
 
   const data = (await res.json()) as FalPricingResponse;
   const map = new Map<string, FalPriceEntry>();
