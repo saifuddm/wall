@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/saifuddm/wall/compare/v1.1.0...v1.1.1) (2026-02-11)
+
+
+### Bug Fixes
+
+* logging full prompt ([8d1d711](https://github.com/saifuddm/wall/commit/8d1d711a009af456e5d1876d50c2d95542caa572))
+
 # [1.1.0](https://github.com/saifuddm/wall/compare/v1.0.2...v1.1.0) (2026-02-11)
 
 
