@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/saifuddm/wall/compare/v1.0.0...v1.0.1) (2026-02-11)
+
+
+### Bug Fixes
+
+* cloudflare worker deploy workflow ([d84eda0](https://github.com/saifuddm/wall/commit/d84eda00a3b80923ba136391893ca538489fd1df))
+
 # 1.0.0 (2026-02-11)
 
 
