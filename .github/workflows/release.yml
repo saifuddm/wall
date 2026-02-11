@@ -13,6 +13,8 @@ jobs:
   release:
     name: Semantic Release
     runs-on: ubuntu-latest
+    outputs:
+      new_release: ${{ steps.check.outputs.new_release }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,6 +28,43 @@ jobs:
 
       - run: npm ci
 
-      - run: npx semantic-release
+      - name: Get latest tag before release
+        id: before
+        run: echo "tag=$(git describe --tags --abbrev=0 2>/dev/null || echo 'none')" >> "$GITHUB_OUTPUT"
+
+      - name: Semantic Release
+        run: npx semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for new release
+        id: check
+        run: |
+          git fetch --tags
+          AFTER=$(git describe --tags --abbrev=0 2>/dev/null || echo 'none')
+          if [ "${{ steps.before.outputs.tag }}" != "$AFTER" ]; then
+            echo "new_release=true" >> "$GITHUB_OUTPUT"
+            echo "New release detected: $AFTER"
+          else
+            echo "new_release=false" >> "$GITHUB_OUTPUT"
+            echo "No new release"
+          fi
+
+  deploy:
+    name: Deploy to Cloudflare Workers
+    needs: release
+    if: needs.release.outputs.new_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx wrangler deploy --minify
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
