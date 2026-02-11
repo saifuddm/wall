@@ -357,7 +357,7 @@ wallpaper.post("/", async (c) => {
   const promptString = JSON.stringify(fullPrompt);
 
   logger.info(
-    { city, weather, datetime, width, height, promptLength: promptString.length },
+    { city, weather, datetime, width, height, prompt: promptString },
     "wallpaper_prompt_ready",
   );
 
